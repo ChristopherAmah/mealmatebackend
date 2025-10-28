@@ -1,5 +1,8 @@
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import status
+from .models import RecipeCategory, MealCalendar
 import requests
 
 BASE_URL = "https://www.themealdb.com/api/json/v1/1"
@@ -105,3 +108,92 @@ def get_recipe_detail(request, pk):
         return Response({"error": f"Server error: {str(e)}"}, status=500)
 
 
+
+from .models import Recipe, RecipeCategory, MealCalendar
+from .serializers import RecipeSerializer, RecipeCategorySerializer, MealCalendarSerializer
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def add_to_category(request):
+    """
+    Adds a recipe to a selected category.
+    If the recipe doesn't exist locally, fetch it from TheMealDB.
+    """
+    meal_id = request.data.get("meal_id")
+    category_name = request.data.get("category")
+
+    if not meal_id or not category_name:
+        return Response(
+            {"error": "meal_id and category are required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Try to get the recipe from local DB
+    recipe = Recipe.objects.filter(meal_id=meal_id).first()
+
+    if not recipe:
+        # Fetch from TheMealDB if not found
+        try:
+            res = requests.get(f"https://www.themealdb.com/api/json/v1/1/lookup.php?i={meal_id}")
+            res.raise_for_status()
+            data = res.json().get("meals")
+
+            if not data:
+                return Response({"error": "Recipe not found on TheMealDB"}, status=404)
+
+            meal = data[0]
+
+            # Create new recipe record
+            recipe = Recipe.objects.create(
+                meal_id=meal.get("idMeal"),
+                title=meal.get("strMeal"),
+                category=meal.get("strCategory"),
+                area=meal.get("strArea"),
+                instructions=meal.get("strInstructions"),
+                thumbnail=meal.get("strMealThumb"),
+                tags=meal.get("strTags"),
+                youtube=meal.get("strYoutube"),
+                source=meal.get("strSource"),
+            )
+
+        except requests.exceptions.RequestException as e:
+            return Response(
+                {"error": f"Failed to fetch recipe details: {str(e)}"},
+                status=500,
+            )
+
+    # Create or update recipe category
+    recipe_category, created = RecipeCategory.objects.update_or_create(
+        user=request.user,
+        recipe=recipe,
+        defaults={"category": category_name},
+    )
+
+    serializer = RecipeCategorySerializer(recipe_category)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "POST"])
+def meal_calendar_view(request):
+    if request.method == "GET":
+        meals = MealCalendar.objects.all().order_by("-date_added")
+        serializer = MealCalendarSerializer(meals, many=True)
+        return Response(serializer.data)
+
+    elif request.method == "POST":
+        serializer = MealCalendarSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+@api_view(["DELETE"])
+def delete_meal_calendar(request, pk):
+    try:
+        meal = MealCalendar.objects.get(pk=pk)
+        meal.delete()
+        return Response({"message": "Meal deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+    except MealCalendar.DoesNotExist:
+        return Response({"error": "Meal not found"}, status=status.HTTP_404_NOT_FOUND)
