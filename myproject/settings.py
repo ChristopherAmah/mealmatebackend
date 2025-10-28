@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-6@3(6k0pah-v&mf3*@zt%ce!sbvgc11u^#@3%f#uuxm)fs$$ke
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['https://meal-mate-api-pd3x.onrender.com']
+ALLOWED_HOSTS = ['meal-mate-api-pd3x.onrender.com']
 
 
 # Application definition
